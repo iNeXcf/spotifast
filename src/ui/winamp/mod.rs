@@ -358,6 +358,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     fit_window(&ctx, window_size(&app.settings, unit));
     let origin = ui.max_rect().min;
     let focused = ctx.input(|input| input.viewport().focused.unwrap_or(true));
+    super::typeahead::leave_page(app, &ctx);
     super::keys::handle(app, &ctx);
     for path in dropped_skins(&ctx) {
         app.actions.push(Action::InstallSkin(path));

@@ -24,6 +24,7 @@ pub mod sidebar;
 pub mod skin_cards;
 mod soloist;
 pub mod topbar;
+mod typeahead;
 mod update;
 pub mod widgets;
 pub mod winamp;
@@ -39,6 +40,8 @@ use crate::theme::{self, Icon};
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let ctx = &ctx;
+    collection::begin_frame(app, ctx);
+    typeahead::enter_page(app, ctx);
     keys::handle(app, ctx);
     for path in winamp::dropped_skins(ctx) {
         app.actions.push(Action::InstallSkin(path));

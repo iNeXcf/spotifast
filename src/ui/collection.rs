@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use egui::{Align, Layout, Rect, Sense, Vec2, pos2, vec2};
 
@@ -16,6 +17,7 @@ use crate::model::{
 use crate::theme::{self, Icon, Palette};
 use crate::util;
 
+use super::typeahead;
 use super::widgets::{self, TrackRow};
 
 pub(super) enum Avatar {
@@ -585,6 +587,7 @@ pub struct TableCache {
     pub sort: Option<TableSort>,
     pub needle: String,
     pub items_revision: u64,
+    pub items_len: usize,
     pub user_names_revision: u64,
     /// Which scan of the local files folder decided the playable rows.
     pub local_files: usize,
@@ -598,6 +601,30 @@ pub struct TableCache {
     /// rows are server slots, not view rows. Unplayable and filtered-out
     /// items have no position.
     pub view_positions: Arc<[Option<usize>]>,
+    /// The visible titles as the type-ahead search reads them, prepared
+    /// once per view instead of once per keystroke.
+    pub typeahead_titles: Arc<[typeahead::NormalizedTitle]>,
+}
+
+fn table_cache_id(data_revision: u64, page: &Page) -> egui::Id {
+    egui::Id::new("table-view-cache")
+        .with(data_revision)
+        .with(page)
+}
+
+fn clear_table_caches_for_revision(ctx: &egui::Context, data_revision: u64) {
+    let marker = egui::Id::new("table-view-cache-revision");
+    if ctx.data(|data| data.get_temp::<u64>(marker)) == Some(data_revision) {
+        return;
+    }
+    ctx.data_mut(|data| {
+        data.remove_by_type::<Arc<TableCache>>();
+        data.insert_temp(marker, data_revision);
+    });
+}
+
+pub(super) fn begin_frame(app: &App, ctx: &egui::Context) {
+    clear_table_caches_for_revision(ctx, app.data_revision);
 }
 
 pub fn table_items_hit(
@@ -704,7 +731,7 @@ pub fn prepare_table_view(
         sort,
         plays_shown_rows,
     } = view;
-    let cache_id = egui::Id::new("table-view-cache").with(page);
+    let cache_id = table_cache_id(app.data_revision, page);
     let cached = ui.data(|d| d.get_temp::<Arc<TableCache>>(cache_id));
     let order = plays_order(app, items, sort);
 
@@ -713,6 +740,7 @@ pub fn prepare_table_view(
             && c.plays_shown_rows == plays_shown_rows
             && c.needle == needle
             && c.items_revision == items_revision
+            && c.items_len == items.len()
             && c.user_names_revision == app.user_names_revision
             && c.local_files == local_files_scan(app)
             && c.plays_order == order
@@ -736,10 +764,15 @@ pub fn prepare_table_view(
             }
             Arc::<[String]>::from(uris)
         });
+        let typeahead_titles = visible
+            .iter()
+            .map(|&index| typeahead::normalize_title(items[index].0.name()))
+            .collect::<Arc<[typeahead::NormalizedTitle]>>();
         let entry = Arc::new(TableCache {
             sort,
             needle: needle.to_string(),
             items_revision,
+            items_len: items.len(),
             user_names_revision: app.user_names_revision,
             local_files: local_files_scan(app),
             plays_order: order,
@@ -747,9 +780,71 @@ pub fn prepare_table_view(
             view_uris,
             plays_shown_rows,
             view_positions: view_positions.into(),
+            typeahead_titles,
         });
         ui.data_mut(|d| d.insert_temp(cache_id, Arc::clone(&entry)));
         entry
+    }
+}
+
+struct TypeaheadFrame {
+    search: typeahead::Search,
+    previous_row: Option<usize>,
+    actions: Vec<typeahead::InputAction>,
+}
+
+fn typeahead_input(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    page: &Page,
+    titles: &[typeahead::NormalizedTitle],
+    loading: bool,
+    error: bool,
+    can_load_more: bool,
+) -> TypeaheadFrame {
+    let state_id = typeahead::state_id(app, page);
+    let mut search = ui
+        .data(|data| data.get_temp::<typeahead::Search>(state_id))
+        .unwrap_or_default();
+    let previous_row = search.row;
+    let typing = ui.ctx().memory(|memory| memory.focused().is_some());
+    let mut actions = Vec::new();
+    if typeahead::owns_keyboard(app, ui.ctx()) && !typing {
+        typeahead::enable_ime(ui.ctx());
+        let now = Instant::now();
+        search.expire(now);
+        search.set_loose(app.settings.typeahead_loose);
+        search.revalidate(titles);
+        let events = ui.input(|input| input.events.clone());
+        actions = search.handle_events(&events, titles);
+
+        let waits_for_more = !search.buffer().is_empty()
+            && search.has_needle()
+            && search.row.is_none()
+            && (loading || (!error && can_load_more));
+        search.set_waiting_for_results(waits_for_more, now);
+        if waits_for_more && !loading {
+            app.actions.push(Action::LoadMore(page.clone()));
+        }
+        search.schedule_expiry(ui.ctx(), now);
+    } else {
+        search.clear();
+    }
+    typeahead::hint(ui.ctx(), app.palette, page, search.buffer());
+    ui.data_mut(|data| data.insert_temp(state_id, search.clone()));
+    TypeaheadFrame {
+        search,
+        previous_row,
+        actions,
+    }
+}
+
+fn typeahead_while_loading(app: &mut App, ui: &mut egui::Ui, page: &Page) {
+    let frame = typeahead_input(app, ui, page, &[], true, false, false);
+    for action in frame.actions {
+        if action == typeahead::InputAction::TogglePlay {
+            app.actions.push(Action::TogglePlay);
+        }
     }
 }
 
@@ -966,6 +1061,45 @@ fn table_contents(app: &mut App, ui: &mut egui::Ui, table: Table<'_>) {
         .collect();
     let picked_positions = picked_positions(&table, &picked, &item_index);
     let mut pick = None;
+    // Type-ahead jump: the row the search points at is painted beneath the
+    // rows and the page scrolls to it.
+    let TypeaheadFrame {
+        search,
+        previous_row,
+        actions,
+    } = typeahead_input(
+        app,
+        ui,
+        &table.page,
+        &entry.typeahead_titles,
+        table.loading,
+        table.error.is_some(),
+        table.can_load_more,
+    );
+    let mut play_rows = Vec::new();
+    for action in actions {
+        match action {
+            typeahead::InputAction::TogglePlay => app.actions.push(Action::TogglePlay),
+            typeahead::InputAction::Play {
+                row,
+                pointer_event_before,
+            } => play_rows.push((row, pointer_event_before)),
+        }
+    }
+    if let Some(row) = search.row
+        && search.row != previous_row
+    {
+        ui.scroll_to_rect(
+            Rect::from_min_max(
+                pos2(ui.max_rect().left(), list_top + row as f32 * row_height),
+                pos2(
+                    ui.max_rect().right(),
+                    list_top + (row + 1) as f32 * row_height,
+                ),
+            ),
+            Some(Align::Center),
+        );
+    }
     let mut row_responses = Vec::new();
     let mut missing = None;
     let mut retry_shown = false;
@@ -1028,6 +1162,21 @@ fn table_contents(app: &mut App, ui: &mut egui::Ui, table: Table<'_>) {
             },
             crate::motion::seconds(ui.ctx(), 0.12),
         );
+        if search.row == Some(row) {
+            ui.painter().rect_filled(
+                Rect::from_min_max(
+                    pos2(ui.max_rect().left(), list_top + row as f32 * row_height),
+                    pos2(
+                        ui.max_rect().right(),
+                        list_top + (row + 1) as f32 * row_height,
+                    ),
+                ),
+                egui::CornerRadius::same(6),
+                palette
+                    .accent
+                    .gamma_multiply(if palette.dark { 0.35 } else { 0.25 }),
+            );
+        }
         let (response, asked) = widgets::track_row_response(
             ui,
             app,
@@ -1089,6 +1238,32 @@ fn table_contents(app: &mut App, ui: &mut egui::Ui, table: Table<'_>) {
     // Escape clears the current selection.
     if !picked.is_empty() && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
         app.clear_picked_rows();
+    }
+    // Row widgets register their menus while drawing. Defer Enter until now
+    // so a popup opened earlier in this same event batch owns the key.
+    if !app.show_devices && app.dialog.is_none() {
+        let popup_open = egui::Popup::is_any_open(ui.ctx());
+        for (row, pointer_event_before) in play_rows {
+            if popup_open && pointer_event_before {
+                continue;
+            }
+            if row >= entry.visible.len() {
+                continue;
+            }
+            let index = entry.visible[row];
+            if table.items[index].0.is_available() {
+                let actual_index = absolute_row_index(table.row_offset, index);
+                app.actions.push(Action::PlayFromRow {
+                    context: context.clone(),
+                    uri: table.items[index].0.uri().to_string(),
+                    index: if sorted {
+                        row as u32
+                    } else {
+                        actual_index as u32
+                    },
+                });
+            }
+        }
     }
     if let Some(slot) = move_slot {
         // Draw the destination line between shifted rows.
@@ -1155,6 +1330,7 @@ fn table_contents(app: &mut App, ui: &mut egui::Ui, table: Table<'_>) {
         && !needle.is_empty()
         && table.can_load_more
         && !table.loading
+        && table.error.is_none()
     {
         // Filtering a partially loaded list: keep fetching so matches appear.
         app.actions.push(Action::LoadMore(table.page));
@@ -1163,7 +1339,7 @@ fn table_contents(app: &mut App, ui: &mut egui::Ui, table: Table<'_>) {
             ui,
             app,
             table.page,
-            table.can_load_more && !table.loading,
+            table.can_load_more && !table.loading && table.error.is_none(),
         );
     }
 }
@@ -1809,11 +1985,13 @@ pub fn top_songs(app: &mut App, ui: &mut egui::Ui) {
         Loadable::Loaded(tracks) => tracks,
         Loadable::Loading | Loadable::NotLoaded => {
             widgets::skeleton_rows(ui, &palette, app.locale, 10);
+            typeahead_while_loading(app, ui, &Page::TopSongs);
             return;
         }
         Loadable::Failed(error) => {
             let error = error.clone();
             widgets::error_row(ui, app, &error, Some(Page::TopSongs));
+            typeahead::clear_state(app, ui.ctx(), &Page::TopSongs);
             return;
         }
     };
@@ -1861,6 +2039,7 @@ pub fn top_songs(app: &mut App, ui: &mut egui::Ui) {
 
 pub fn playlist(app: &mut App, ui: &mut egui::Ui, id: &str) {
     if !app.playlist_pages.contains_key(id) {
+        typeahead_while_loading(app, ui, &Page::Playlist(id.to_string()));
         app.ensure_loaded(Page::Playlist(id.to_string()));
     }
     let Some(mut page) = app.playlist_pages.remove(id) else {
@@ -2042,6 +2221,7 @@ pub fn playlist(app: &mut App, ui: &mut egui::Ui, id: &str) {
             } else {
                 widgets::skeleton_rows(ui, &app.palette, app.locale, 8);
             }
+            typeahead_while_loading(app, ui, &Page::Playlist(id.to_string()));
         }
         Loadable::Failed(error) => {
             let error = error.clone();
@@ -2068,6 +2248,7 @@ pub fn playlist(app: &mut App, ui: &mut egui::Ui, id: &str) {
             } else {
                 widgets::error_row(ui, app, &error, Some(Page::Playlist(id.to_string())));
             }
+            typeahead::clear_state(app, ui.ctx(), &Page::Playlist(id.to_string()));
         }
     }
     app.playlist_pages.insert(id.to_string(), page);
@@ -2075,6 +2256,7 @@ pub fn playlist(app: &mut App, ui: &mut egui::Ui, id: &str) {
 
 pub fn album(app: &mut App, ui: &mut egui::Ui, id: &str) {
     if !app.album_pages.contains_key(id) {
+        typeahead_while_loading(app, ui, &Page::Album(id.to_string()));
         app.ensure_loaded(Page::Album(id.to_string()));
     }
     let Some(page) = app.album_pages.remove(id) else {
@@ -2249,6 +2431,7 @@ pub fn album(app: &mut App, ui: &mut egui::Ui, id: &str) {
             } else {
                 widgets::skeleton_rows(ui, &app.palette, app.locale, 8);
             }
+            typeahead_while_loading(app, ui, &Page::Album(id.to_string()));
         }
         Loadable::Failed(error) => {
             let error = error.clone();
@@ -2275,6 +2458,7 @@ pub fn album(app: &mut App, ui: &mut egui::Ui, id: &str) {
             } else {
                 widgets::error_row(ui, app, &error, Some(Page::Album(id.to_string())));
             }
+            typeahead::clear_state(app, ui.ctx(), &Page::Album(id.to_string()));
         }
     }
     app.album_pages.insert(id.to_string(), page);
@@ -3927,6 +4111,7 @@ mod tests {
             sort,
             needle: "desp".to_string(),
             items_revision: 5,
+            items_len: 1,
             user_names_revision: 2,
             local_files: 0,
             plays_order: 0,
@@ -3934,6 +4119,7 @@ mod tests {
             view_uris: Some(Arc::new(["spotify:track:t_2".to_string()])),
             plays_shown_rows: false,
             view_positions: Arc::new([Some(0)]),
+            typeahead_titles: Arc::new([typeahead::normalize_title("Despacito")]),
         };
 
         // Cache hit
@@ -3941,6 +4127,7 @@ mod tests {
             cache.sort == sort
                 && cache.needle == "desp"
                 && cache.items_revision == 5
+                && cache.items_len == 1
                 && cache.user_names_revision == 2
         );
 
@@ -3957,8 +4144,25 @@ mod tests {
         // Cache miss on items_revision change
         assert_ne!(cache.items_revision, 6);
 
+        // Cache miss when a producer appends rows without changing revision.
+        assert_ne!(cache.items_len, 2);
+
         // Cache miss on user_names_revision change
         assert_ne!(cache.user_names_revision, 3);
+
+        // Account-scoped rows never share an egui cache generation.
+        assert_ne!(
+            table_cache_id(1, &Page::TopSongs),
+            table_cache_id(2, &Page::TopSongs)
+        );
+
+        let ctx = egui::Context::default();
+        clear_table_caches_for_revision(&ctx, 1);
+        let held_id = table_cache_id(1, &Page::TopSongs);
+        ctx.data_mut(|data| data.insert_temp(held_id, Arc::new(cache)));
+        assert!(ctx.data(|data| data.get_temp::<Arc<TableCache>>(held_id).is_some()));
+        clear_table_caches_for_revision(&ctx, 2);
+        assert!(ctx.data(|data| data.get_temp::<Arc<TableCache>>(held_id).is_none()));
     }
 
     #[test]

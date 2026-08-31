@@ -37,6 +37,10 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     // its caret.
     let editing_text = ctx.text_edit_focused();
     let songs_picked = app.picked_rows(app.page()).is_some();
+    // On the song lists, type-ahead owns the plain letters: M, S, R, Q, and
+    // L type into the search instead of meaning mute, shuffle, repeat,
+    // queue, and lyrics. Everywhere else they keep their shortcuts.
+    let typeahead_jumps = super::typeahead::owns_keyboard(app, ctx);
     let mut actions = Vec::new();
     ctx.input_mut(|input| {
         // With songs picked, Shift+Q is the song list's: it queues them.
@@ -120,7 +124,10 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         if !editing_text {
             // Space always controls the current song, even when a song row
             // or button has focus. Enter still activates the focused control.
-            key(Modifiers::NONE, Key::Space, Action::TogglePlay);
+            // Type-ahead takes it on the song lists to type a space.
+            if !typeahead_jumps {
+                key(Modifiers::NONE, Key::Space, Action::TogglePlay);
+            }
             key(Modifiers::ALT, Key::ArrowLeft, Action::Back);
             key(Modifiers::ALT, Key::ArrowRight, Action::Forward);
             key(Modifiers::COMMAND, Key::ArrowLeft, Action::Previous);
@@ -141,13 +148,16 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
             );
             key(Modifiers::SHIFT, Key::ArrowLeft, Action::SeekBy(-10_000));
             key(Modifiers::SHIFT, Key::ArrowRight, Action::SeekBy(10_000));
-            key(Modifiers::NONE, Key::M, Action::ToggleMute);
-            key(Modifiers::NONE, Key::S, Action::ToggleShuffle);
-            key(Modifiers::NONE, Key::R, Action::CycleRepeat);
-            if !queue_key_is_the_lists {
-                key(Modifiers::NONE, Key::Q, Action::ToggleQueuePanel);
+            // Type-ahead owns the plain letters on the song lists.
+            if !typeahead_jumps {
+                key(Modifiers::NONE, Key::M, Action::ToggleMute);
+                key(Modifiers::NONE, Key::S, Action::ToggleShuffle);
+                key(Modifiers::NONE, Key::R, Action::CycleRepeat);
+                if !queue_key_is_the_lists {
+                    key(Modifiers::NONE, Key::Q, Action::ToggleQueuePanel);
+                }
+                key(Modifiers::NONE, Key::L, Action::ToggleLyricsPanel);
             }
-            key(Modifiers::NONE, Key::L, Action::ToggleLyricsPanel);
             key(Modifiers::NONE, Key::Slash, Action::FocusSearch);
             key(
                 Modifiers::NONE,
@@ -328,6 +338,10 @@ pub fn shortcuts(locale: Locale) -> Vec<(Cow<'static, str>, Cow<'static, str>)> 
             gettext(locale, "Song list: play the selected songs next"),
         ),
         (keys("Delete"), gettext(locale, "Remove from this playlist")),
+        (
+            keys("A–Z"),
+            gettext(locale, "Jump in the song list (Enter plays, Esc clears)"),
+        ),
         (
             keys(platform_shortcut("Ctrl+A", "Cmd+A")),
             gettext(locale, "Song list: select all"),
