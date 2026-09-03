@@ -31267,6 +31267,60 @@ mod tests {
     }
 
     #[test]
+    fn a_stale_playlist_error_does_not_stop_sorted_cache_loading() {
+        let mut app = headless_app();
+        app.backend.set_offline(true);
+        app.table_sorts.insert(
+            Page::Playlist("large".into()),
+            TableSort {
+                column: SortColumn::Title,
+                ascending: true,
+            },
+        );
+        app.playlist_pages.insert(
+            "large".into(),
+            PlaylistPage {
+                generation: 7,
+                playlist: Loadable::Loaded(Playlist {
+                    snapshot_id: Some("current".into()),
+                    ..Default::default()
+                }),
+                items: PagedList {
+                    items: vec![cached_playlist_row("spotify:track:one")],
+                    total: Some(10_000),
+                    next_offset: Some(500),
+                    loaded_once: true,
+                    ..Default::default()
+                },
+                items_generation: 7,
+                cache_checked: true,
+                cache_restored_through: Some(500),
+                tail_checked: true,
+                ..Default::default()
+            },
+        );
+        let _ = app.backend.take_playlist_item_requests();
+
+        // The offset-zero request began before the longer cache was restored.
+        // Its failure is obsolete and must not stop a sorted view loading the
+        // uncached remainder.
+        app.handle_api(ApiResponse::PlaylistItems {
+            id: "large".into(),
+            offset: 0,
+            generation: 7,
+            result: Err(crate::api::ApiError::Network("offline".into())),
+        });
+
+        assert_eq!(
+            app.backend.take_playlist_item_requests(),
+            vec![("large".into(), 500, 7)]
+        );
+        let page = &app.playlist_pages["large"];
+        assert!(page.items.loading);
+        assert!(page.items.error.is_none());
+    }
+
+    #[test]
     fn a_partial_playlist_cache_from_an_old_snapshot_is_not_shown() {
         let mut app = headless_app();
         app.backend.set_offline(true);
@@ -32248,7 +32302,7 @@ mod tests {
         assert!(!app.library.liked.loading);
         assert_eq!(
             app.library.liked.error.as_deref(),
-            Some("network error: offline")
+            Some("Network connection error. Check your connection.")
         );
     }
 
