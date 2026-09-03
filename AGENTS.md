@@ -13,6 +13,13 @@ These instructions add implementation constraints for coding agents.
   there.
 - Code, issue tracking, automation, packages, and releases belong only in
   `iNeXcf/fastpotify` and its `fork` remote.
+- Design every Fastpotify+ change as a patch that can be reapplied cleanly on
+  top of the current `crmne/fastpotify` `main`. Prefer additive modules, narrow
+  integration points, and focused commits over copied or rewritten upstream
+  code. Avoid unrelated refactors and formatting churn that make rebases
+  harder.
+- When upstream gains equivalent behaviour, remove or shrink the fork patch
+  instead of maintaining a duplicate implementation.
 - Keep useful upstream product and quality constraints unless Fastpotify+
   explicitly chooses a different direction. The fork policy in this section
   overrides upstream contribution, branch, and release instructions below.
@@ -174,9 +181,10 @@ Reviewers treat either problem in a pull request as a blocker.
 
 Work only in `iNeXcf/fastpotify`. The maintained Fastpotify+ application branch
 is `feature/typeahead-song-lists`; the fork's `main` branch holds fork-level
-automation. Rebase the application branch onto upstream `main`, but push only
-to the `fork` remote. Keep one topic per commit, with each commit compiling and
-passing its relevant checks.
+automation. Keep the application branch linear: upstream `main` followed only
+by Fastpotify+ commits. Rebase it when upstream moves; never merge upstream into
+it. Push only to the `fork` remote. Keep one topic per commit, with each commit
+compiling and passing its relevant checks.
 
 Keep `main` linear. Squash outside pull requests into one focused commit,
 preserving contributor credit. Never create or push merge commits, including
