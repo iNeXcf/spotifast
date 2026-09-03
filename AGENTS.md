@@ -180,7 +180,7 @@ Reviewers treat either problem in a pull request as a blocker.
 ## Branches
 
 Work only in `iNeXcf/fastpotify`. The maintained Fastpotify+ application branch
-is `feature/typeahead-song-lists`; the fork's `main` branch holds fork-level
+is `fastpotify-plus`; the fork's `main` branch holds fork-level
 automation. Keep the application branch linear: upstream `main` followed only
 by Fastpotify+ commits. Rebase it when upstream moves; never merge upstream into
 it. Push only to the `fork` remote. Keep one topic per commit, with each commit
