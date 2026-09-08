@@ -62,6 +62,7 @@ struct Running {
     fps: u32,
     seconds: u32,
     scale: u32,
+    single_key_shortcuts: bool,
     /// The song last told to the window, which overlays a change.
     song: Option<Vec<String>>,
 }
@@ -98,6 +99,7 @@ impl Host {
         fps: u32,
         seconds: u32,
         scale: u32,
+        single_key_shortcuts: bool,
     ) {
         if self.running.is_some() {
             return;
@@ -136,6 +138,8 @@ impl Host {
             .arg(seconds.to_string())
             .arg("--milkdrop-scale")
             .arg(scale.to_string())
+            .arg("--milkdrop-single-key-shortcuts")
+            .arg(single_key_shortcuts.to_string())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
@@ -169,22 +173,30 @@ impl Host {
             fps,
             seconds,
             scale,
+            single_key_shortcuts,
             song: None,
         });
     }
 
     /// Sends new settings to the window, if they changed.
-    pub fn update(&mut self, fps: u32, seconds: u32, scale: u32) {
+    pub fn update(&mut self, fps: u32, seconds: u32, scale: u32, single_key_shortcuts: bool) {
         let Some(running) = &mut self.running else {
             return;
         };
-        if running.fps == fps && running.seconds == seconds && running.scale == scale {
+        if running.fps == fps
+            && running.seconds == seconds
+            && running.scale == scale
+            && running.single_key_shortcuts == single_key_shortcuts
+        {
             return;
         }
         running.fps = fps;
         running.seconds = seconds;
         running.scale = scale;
-        let line = format!("{{\"fps\":{fps},\"seconds\":{seconds},\"scale\":{scale}}}\n");
+        running.single_key_shortcuts = single_key_shortcuts;
+        let line = format!(
+            "{{\"fps\":{fps},\"seconds\":{seconds},\"scale\":{scale},\"single_key_shortcuts\":{single_key_shortcuts}}}\n"
+        );
         if running.stdin.write_all(line.as_bytes()).is_err() {
             // The child is gone; the next poll will report it closed.
             self.tap.set_shm(None);

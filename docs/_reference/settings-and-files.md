@@ -398,6 +398,8 @@ main fields are:
 | `sidebar_grid` | `false` | Library entries as responsive cover cards instead of rows |
 | `tracklist_compact` | `false` | One-line track rows without covers |
 | `middle_click_autoscroll` | `false` | Linux only: middle-click a list to autoscroll it. Windows always autoscrolls and macOS never does |
+
+| `single_key_shortcuts` | `true` | Allow standalone shortcut actions in all windows; typing, type-ahead, focused controls and modified shortcuts work either way |
 | `typeahead_jump` | `false` | Plain typing jumps to matching songs in track lists |
 | `typeahead_loose` | `true` | Also match typed letters elsewhere in a title, in order |
 | `winamp_window` | `false` | The window is the Winamp mini player |

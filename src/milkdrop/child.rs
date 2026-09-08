@@ -37,6 +37,7 @@ struct Control {
     fps: Option<u32>,
     seconds: Option<u32>,
     scale: Option<u32>,
+    single_key_shortcuts: Option<bool>,
     /// The playing song, as lines to overlay when it changes.
     song: Option<Vec<String>>,
     close: Option<bool>,
@@ -74,16 +75,20 @@ pub struct Args {
     pub scale: u32,
     /// Where to publish frames, instead of opening a window.
     pub frames: Option<PathBuf>,
+    pub single_key_shortcuts: bool,
 }
 
 impl Args {
     /// Reads the child's arguments from the command line; `None` when this is
     /// not a child process.
     pub fn parse() -> Option<Self> {
-        let mut all = std::env::args().skip(1);
         if !std::env::args().any(|arg| arg == "--milkdrop-child") {
             return None;
         }
+        Self::parse_from(std::env::args().skip(1))
+    }
+
+    fn parse_from(mut all: impl Iterator<Item = String>) -> Option<Self> {
         let mut shm = None;
         let mut presets = None;
         let mut size = super::DEFAULT_SIZE;
@@ -93,6 +98,7 @@ impl Args {
         let mut seconds = DEFAULT_SECONDS;
         let mut scale = 1u32;
         let mut frames = None;
+        let mut single_key_shortcuts = true;
         while let Some(arg) = all.next() {
             match arg.as_str() {
                 "--milkdrop-shm" => shm = all.next().map(PathBuf::from),
@@ -112,6 +118,12 @@ impl Args {
                 "--milkdrop-scale" => {
                     scale = all.next().and_then(|v| v.parse().ok()).unwrap_or(scale);
                 }
+                "--milkdrop-single-key-shortcuts" => {
+                    single_key_shortcuts = all
+                        .next()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(single_key_shortcuts);
+                }
                 _ => {}
             }
         }
@@ -125,6 +137,7 @@ impl Args {
             seconds,
             scale,
             frames,
+            single_key_shortcuts,
         })
     }
 }
@@ -216,6 +229,7 @@ struct Child {
     screen_hz: Option<f32>,
     scale: u32,
     seconds: u32,
+    single_key_shortcuts: bool,
     pointer: PhysicalPosition<f64>,
     last_click: Option<Instant>,
     next_frame: Instant,
@@ -235,6 +249,7 @@ impl Child {
         let fps = args.fps;
         let scale = args.scale;
         let seconds = args.seconds;
+        let single_key_shortcuts = args.single_key_shortcuts;
         Self {
             args,
             ring,
@@ -254,6 +269,7 @@ impl Child {
             fps,
             scale,
             seconds,
+            single_key_shortcuts,
             pointer: PhysicalPosition::new(0.0, 0.0),
             last_click: None,
             next_frame: Instant::now(),
@@ -457,16 +473,19 @@ impl Child {
                 .as_ref()
                 .is_some_and(|live| live.window.is_minimized() == Some(true))
     }
-}
-
-impl ApplicationHandler<Control> for Child {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.live.is_none() {
-            self.create(event_loop);
+    /// Applies live settings without needing a window; returns whether to close.
+    fn apply_control(&mut self, control: Control) -> bool {
+        if let Some(enabled) = control.single_key_shortcuts {
+            self.single_key_shortcuts = enabled;
+            if !enabled && self.showing_keys {
+                if let Some(live) = &mut self.live
+                    && let Some(overlay) = &mut live.overlay
+                {
+                    overlay.hide();
+                }
+                self.showing_keys = false;
+            }
         }
-    }
-
-    fn user_event(&mut self, event_loop: &ActiveEventLoop, control: Control) {
         if let Some(scale) = control.scale {
             self.scale = scale.clamp(1, 4);
         }
@@ -486,7 +505,19 @@ impl ApplicationHandler<Control> for Child {
         if let Some(seconds) = control.seconds {
             self.seconds = seconds;
         }
-        if control.close == Some(true) {
+        control.close == Some(true)
+    }
+}
+
+impl ApplicationHandler<Control> for Child {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.live.is_none() {
+            self.create(event_loop);
+        }
+    }
+
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, control: Control) {
+        if self.apply_control(control) {
             self.close(event_loop);
         } else if let Some(live) = &self.live {
             live.window.request_redraw();
@@ -592,7 +623,25 @@ impl Child {
         }
     }
 
+    fn key_allowed(&self, key: &Key) -> bool {
+        self.single_key_shortcuts
+            || match key {
+                Key::Named(NamedKey::Escape) => true,
+                Key::Named(
+                    NamedKey::ArrowLeft
+                    | NamedKey::ArrowRight
+                    | NamedKey::ArrowUp
+                    | NamedKey::ArrowDown,
+                ) => self.modifiers.control_key() || self.modifiers.super_key(),
+                Key::Named(NamedKey::Enter) => self.modifiers.alt_key(),
+                _ => false,
+            }
+    }
+
     fn on_key(&mut self, key: Key, event_loop: &ActiveEventLoop) {
+        if !self.key_allowed(&key) {
+            return;
+        }
         let fullscreen = self.live.as_ref().is_some_and(|live| live.fullscreen);
         // Control (Command on the Mac) is what the app's own playback
         // shortcuts are held with; a plain key is the window's own.
@@ -1095,11 +1144,12 @@ pub(super) fn build(
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use winit::keyboard::ModifiersState;
 
     static NEXT_RING: AtomicU64 = AtomicU64::new(0);
 
     /// A child with no window, for the parts that need none.
-    fn headless_child() -> Child {
+    fn headless_child(single_key_shortcuts: bool) -> Child {
         let dir = std::env::temp_dir().join(format!(
             "spotifast-milkdrop-child-{}-{}",
             std::process::id(),
@@ -1119,15 +1169,138 @@ mod tests {
                 seconds: 30,
                 scale: 1,
                 frames: None,
+                single_key_shortcuts,
             },
             ring,
         )
     }
 
+    #[test]
+    fn single_key_shortcuts_are_set_before_the_window_opens() {
+        for (extra, enabled) in [
+            (&[][..], true),
+            (&["--milkdrop-single-key-shortcuts", "true"][..], true),
+            (&["--milkdrop-single-key-shortcuts", "false"][..], false),
+        ] {
+            let args = Args::parse_from(
+                ["--milkdrop-shm", "ring", "--milkdrop-presets", "presets"]
+                    .into_iter()
+                    .chain(extra.iter().copied())
+                    .map(str::to_owned),
+            )
+            .expect("valid child arguments");
+            assert_eq!(args.single_key_shortcuts, enabled);
+            let child = headless_child(args.single_key_shortcuts);
+            assert!(child.live.is_none());
+            assert_eq!(child.key_allowed(&Key::Named(NamedKey::Space)), enabled);
+        }
+    }
+
+    #[test]
+    fn live_controls_toggle_shortcuts_and_partial_updates_keep_the_preference() {
+        let mut child = headless_child(false);
+        for enabled in [true, false, true] {
+            child.showing_keys = true;
+            let control =
+                serde_json::from_str(&format!("{{\"single_key_shortcuts\":{enabled}}}")).unwrap();
+            assert!(!child.apply_control(control));
+            assert_eq!(child.single_key_shortcuts, enabled);
+            assert_eq!(child.key_allowed(&Key::Named(NamedKey::Space)), enabled);
+            assert_eq!(child.showing_keys, enabled, "disabled keys dismiss help");
+
+            for line in [
+                "{}",
+                r#"{"fps":60,"seconds":12,"scale":2}"#,
+                r#"{"song":["A song","An artist"]}"#,
+            ] {
+                assert!(!child.apply_control(serde_json::from_str(line).unwrap()));
+                assert_eq!(child.single_key_shortcuts, enabled, "{line}");
+                assert_eq!(child.key_allowed(&Key::Named(NamedKey::Space)), enabled);
+            }
+        }
+        assert_eq!((child.fps, child.seconds, child.scale), (60, 12, 2));
+        assert_eq!(child.song, Some(vec!["A song".into(), "An artist".into()]));
+        assert!(child.apply_control(serde_json::from_str(r#"{"close":true}"#).unwrap()));
+    }
+
+    #[test]
+    fn every_single_key_and_shifted_alias_obeys_the_preference() {
+        let mut child = headless_child(false);
+        let keys = [
+            NamedKey::Space,
+            NamedKey::ArrowLeft,
+            NamedKey::ArrowRight,
+            NamedKey::F1,
+        ]
+        .into_iter()
+        .map(Key::Named)
+        .chain(
+            "mMbBsSnNpPhHlLrRfFiItTdD?"
+                .chars()
+                .map(|key| Key::Character(key.to_string().into())),
+        );
+        for key in keys {
+            for modifiers in [ModifiersState::empty(), ModifiersState::SHIFT] {
+                child.modifiers = modifiers;
+                for enabled in [false, true] {
+                    child.single_key_shortcuts = enabled;
+                    assert_eq!(child.key_allowed(&key), enabled, "{key:?}, {modifiers:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn disabled_shortcuts_keep_only_explicit_modified_keys_and_escape() {
+        let mut child = headless_child(false);
+        for modifiers in [
+            ModifiersState::empty(),
+            ModifiersState::CONTROL,
+            ModifiersState::SUPER,
+            ModifiersState::ALT,
+            ModifiersState::CONTROL | ModifiersState::ALT,
+            ModifiersState::SUPER | ModifiersState::ALT,
+        ] {
+            for shift in [ModifiersState::empty(), ModifiersState::SHIFT] {
+                child.modifiers = modifiers | shift;
+                assert!(child.key_allowed(&Key::Named(NamedKey::Escape)));
+                for arrow in [
+                    NamedKey::ArrowLeft,
+                    NamedKey::ArrowRight,
+                    NamedKey::ArrowUp,
+                    NamedKey::ArrowDown,
+                ] {
+                    assert_eq!(
+                        child.key_allowed(&Key::Named(arrow)),
+                        modifiers.control_key() || modifiers.super_key(),
+                        "{arrow:?}, {:?}",
+                        child.modifiers
+                    );
+                }
+                assert_eq!(
+                    child.key_allowed(&Key::Named(NamedKey::Enter)),
+                    modifiers.alt_key()
+                );
+                for key in [
+                    Key::Named(NamedKey::Space),
+                    Key::Named(NamedKey::F1),
+                    Key::Character("?".into()),
+                    Key::Character("f".into()),
+                ] {
+                    assert!(
+                        !child.key_allowed(&key),
+                        "an unbound modifier must not enable {key:?}: {:?}",
+                        child.modifiers
+                    );
+                }
+            }
+        }
+    }
+
     /// The limit is the number it was given, and nothing at zero.
     #[test]
     fn the_frame_limit_is_the_number_it_was_given() {
-        let mut child = headless_child();
+        let mut child = headless_child(true);
         let hz = |interval: Option<Duration>| {
             interval.map(|gap| (1.0 / gap.as_secs_f32()).round() as u32)
         };
@@ -1142,7 +1315,7 @@ mod tests {
     /// Frame deadlines do not drift with rendering time.
     #[test]
     fn the_frame_limit_does_not_drift_with_the_drawing() {
-        let mut child = headless_child();
+        let mut child = headless_child(true);
         child.fps = 60;
         let interval = Duration::from_secs_f32(1.0 / 60.0);
         let start = Instant::now();
@@ -1173,7 +1346,7 @@ mod tests {
     /// Each corner status renders independently and clears when disabled.
     #[test]
     fn each_corner_carries_what_was_switched_on() {
-        let mut child = headless_child();
+        let mut child = headless_child(true);
         for what in [Status::Fps, Status::Song, Status::Preset] {
             assert!(
                 child.corner_lines(what).is_empty(),

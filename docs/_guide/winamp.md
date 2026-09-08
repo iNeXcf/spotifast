@@ -13,6 +13,10 @@ skins at the [Winamp Skin Museum](https://skins.webamp.org).
 Only one player window is open at a time. Click the skin logo or Eject, or use
 the shortcut again, to return to the main window.
 
+Turning off **Single-key shortcuts** in Settings also disables the mini
+player's standalone shortcuts, including Space and `B` (like/unlike).
+Modified shortcuts and clicking the skin's controls still work.
+
 ![The mini player wearing the built-in skin](/assets/images/winamp.png)
 
 ## Skins and window size

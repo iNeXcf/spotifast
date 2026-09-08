@@ -308,6 +308,12 @@ search. Since 0.9.0, `Space` plays or pauses the current song even
 when a song row or control has focus. Text fields keep Space for typing.
 Unmodified letter shortcuts still yield to the focused control.
 
+To turn off standalone shortcut actions everywhere, disable **Single-key
+shortcuts** in Settings. This includes letters, Space, `/`, and `?` in the
+main window and Winamp, plus MilkDrop's single-key controls. The option is on
+by default and applies immediately. Modified shortcuts, text editing,
+type-ahead, focused-control activation, and Escape are unaffected.
+
 This is the first part of screen-reader support. Windows testing with NVDA
 remains tracked in [#262](https://github.com/crmne/spotifast/issues/262).
 Winamp skins do not yet have equivalent accessibility coverage.
@@ -894,3 +900,5 @@ The matched row is highlighted. Enter plays it, Backspace edits the query,
 and Escape or two seconds without typing clears it. Because a letter cannot
 be both search text and a shortcut, all plain-letter shortcuts (including `B`
 to like or unlike the playing song) yield to type-ahead on those pages.
+Space joins an active query. With an empty query it only plays or pauses when
+**Single-key shortcuts** is enabled.

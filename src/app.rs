@@ -4819,6 +4819,7 @@ impl App {
         let fps = crate::power::milkdrop_fps(self.power.conditions(), self.settings.milkdrop_fps);
         let seconds = self.settings.milkdrop_seconds;
         let scale = self.settings.milkdrop_scale.max(1);
+        let single_key_shortcuts = self.settings.single_key_shortcuts;
         // Track metadata shown when the song changes.
         let song = self.now_playing().filter(|now| !now.resuming).map(|now| {
             // Title, artist, and album.
@@ -4836,9 +4837,18 @@ impl App {
             let host = self.milkdrop_host.as_mut().expect("the host was just made");
             if open {
                 if !host.is_running() {
-                    host.open(&presets, size, pos, fullscreen, fps, seconds, scale);
+                    host.open(
+                        &presets,
+                        size,
+                        pos,
+                        fullscreen,
+                        fps,
+                        seconds,
+                        scale,
+                        single_key_shortcuts,
+                    );
                 }
-                host.update(fps, seconds, scale);
+                host.update(fps, seconds, scale, single_key_shortcuts);
                 host.song(song);
             } else if host.is_running() {
                 host.close();

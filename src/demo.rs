@@ -2392,35 +2392,38 @@ mod tests {
     #[test]
     fn accessible_navigation_and_pause_work_without_a_pointer() {
         use egui::accesskit::{Action, Role};
-        let (ctx, mut app) = accessible_app("navigate");
-        accessible_frame(&ctx, &mut app, vec![]);
-        let tree = accessible_frame(&ctx, &mut app, vec![]);
-        let liked = accessible_node(&tree, "Liked Songs", Role::Button);
-        accessible_frame(
-            &ctx,
-            &mut app,
-            vec![accessible_action(liked, Action::Click, None)],
-        );
-        assert_eq!(app.page(), &Page::LikedSongs);
-        let tree = accessible_frame(&ctx, &mut app, vec![]);
-        let pause = accessible_node(&tree, "Pause", Role::Button);
-        assert!(app.believed_playing());
-        accessible_frame(
-            &ctx,
-            &mut app,
-            vec![accessible_action(pause, Action::Focus, None)],
-        );
-        let tree = accessible_frame(
-            &ctx,
-            &mut app,
-            vec![keyboard(egui::Key::Space, egui::Modifiers::NONE)],
-        );
-        assert!(
-            !app.believed_playing(),
-            "focused Space must pause once, without firing the global shortcut too"
-        );
-        assert_eq!(tree.focus, pause);
-        app.backend.shutdown();
+        for enabled in [true, false] {
+            let (ctx, mut app) = accessible_app("navigate");
+            app.settings.single_key_shortcuts = enabled;
+            accessible_frame(&ctx, &mut app, vec![]);
+            let tree = accessible_frame(&ctx, &mut app, vec![]);
+            let liked = accessible_node(&tree, "Liked Songs", Role::Button);
+            accessible_frame(
+                &ctx,
+                &mut app,
+                vec![accessible_action(liked, Action::Click, None)],
+            );
+            assert_eq!(app.page(), &Page::LikedSongs);
+            let tree = accessible_frame(&ctx, &mut app, vec![]);
+            let pause = accessible_node(&tree, "Pause", Role::Button);
+            assert!(app.believed_playing());
+            accessible_frame(
+                &ctx,
+                &mut app,
+                vec![accessible_action(pause, Action::Focus, None)],
+            );
+            let tree = accessible_frame(
+                &ctx,
+                &mut app,
+                vec![keyboard(egui::Key::Space, egui::Modifiers::NONE)],
+            );
+            assert!(
+                !app.believed_playing(),
+                "focused Space must pause once, without firing the global shortcut too"
+            );
+            assert_eq!(tree.focus, pause);
+            app.backend.shutdown();
+        }
     }
 
     /// #990: Page Up/Down scroll the main page, Home/End jump to its ends.
@@ -13183,6 +13186,103 @@ mod tests {
         assert!(app.show_lyrics_panel);
         press(&ctx, &mut app, egui::Key::B);
         assert_eq!(app.saved.get("spotify:track:trk0"), Some(&false));
+        app.backend.shutdown();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn single_key_shortcuts_switch_applies_immediately_in_main_and_winamp() {
+        use egui::accesskit::{Action, Role, Toggled};
+        let (ctx, mut app) = accessible_app("single-key-shortcuts");
+        app.open(Page::Settings);
+        accessible_frame(&ctx, &mut app, vec![]);
+        let tree = accessible_frame(&ctx, &mut app, vec![]);
+        let switch = accessible_node(&tree, "Single-key shortcuts", Role::CheckBox);
+        assert!(app.settings.single_key_shortcuts);
+        let tree = accessible_frame(
+            &ctx,
+            &mut app,
+            vec![accessible_action(switch, Action::Click, None)],
+        );
+        assert!(!app.settings.single_key_shortcuts);
+        let node = &tree.nodes.iter().find(|(id, _)| *id == switch).unwrap().1;
+        assert_eq!(node.toggled(), Some(Toggled::False));
+
+        app.open(Page::Home);
+        for winamp in [false, true] {
+            app.settings.winamp_window = winamp;
+            frame(&ctx, &mut app);
+            frame(&ctx, &mut app);
+            assert!(ctx.memory(|memory| memory.focused().is_none()));
+            let saved = app.saved["spotify:track:trk0"];
+            let playing = app.believed_playing();
+            press(&ctx, &mut app, egui::Key::B);
+            press(&ctx, &mut app, egui::Key::Space);
+            assert_eq!(app.saved["spotify:track:trk0"], saved);
+            assert_eq!(app.believed_playing(), playing);
+
+            app.settings.single_key_shortcuts = true;
+            press(&ctx, &mut app, egui::Key::B);
+            assert_eq!(app.saved["spotify:track:trk0"], !saved);
+            app.settings.single_key_shortcuts = false;
+        }
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn disabling_single_key_shortcuts_keeps_typeahead_without_idle_space_playback() {
+        let (ctx, mut app, root) = playlist_app(
+            "typeahead-no-shortcuts",
+            Settings {
+                single_key_shortcuts: false,
+                ..typeahead_settings()
+            },
+        );
+        let space = vec![
+            keyboard(egui::Key::Space, egui::Modifiers::NONE),
+            egui::Event::Text(" ".into()),
+            egui::Event::Key {
+                key: egui::Key::Space,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ];
+        let playing = app.believed_playing();
+        frame_events(&ctx, &mut app, space.clone());
+        assert_eq!(app.believed_playing(), playing);
+
+        let items = {
+            let page = app.playlist_pages.get_mut("pl1").unwrap();
+            page.items.loading = true;
+            page.items.revision = page.items.revision.wrapping_add(1);
+            std::mem::take(&mut page.items.items)
+        };
+        frame_events(&ctx, &mut app, space.clone());
+        assert_eq!(app.believed_playing(), playing);
+        {
+            let page = app.playlist_pages.get_mut("pl1").unwrap();
+            page.items.items = items;
+            page.items.loading = false;
+            page.items.revision = page.items.revision.wrapping_add(1);
+        }
+
+        type_text(&ctx, &mut app, "day");
+        frame_events(&ctx, &mut app, space);
+        frame_events(
+            &ctx,
+            &mut app,
+            vec![
+                keyboard(egui::Key::B, egui::Modifiers::NONE),
+                egui::Event::Text("bz".into()),
+                keyboard(egui::Key::Backspace, egui::Modifiers::NONE),
+            ],
+        );
+        assert_eq!(app.believed_playing(), playing);
+        assert_eq!(app.saved.get("spotify:track:trk0"), Some(&true));
+        press(&ctx, &mut app, egui::Key::Enter);
+        assert!(app.play_pending("spotify:track:trk9"));
         app.backend.shutdown();
         let _ = std::fs::remove_dir_all(root);
     }

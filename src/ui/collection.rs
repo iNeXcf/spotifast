@@ -817,6 +817,9 @@ fn typeahead_input(
         search.revalidate(titles);
         let events = ui.input(|input| input.events.clone());
         actions = search.handle_events(&events, titles);
+        if !app.settings.single_key_shortcuts {
+            actions.retain(|action| *action != typeahead::InputAction::TogglePlay);
+        }
 
         let waits_for_more = !search.buffer().is_empty()
             && search.has_needle()

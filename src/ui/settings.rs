@@ -1593,6 +1593,24 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             widgets::setting_row(
                 ui,
                 &palette,
+                "Single-key shortcuts",
+                "Allow single-key actions in all windows. Type-ahead, focused controls and modified shortcuts work either way.",
+                |ui| {
+                    if widgets::switch(
+                        ui,
+                        &palette,
+                        "Single-key shortcuts",
+                        &mut app.settings.single_key_shortcuts,
+                    )
+                    .changed()
+                    {
+                        changed = true;
+                    }
+                },
+            );
+            widgets::setting_row(
+                ui,
+                &palette,
                 "Type-ahead in song lists",
                 "Typing letters jumps to matching songs; plain-letter shortcuts are unavailable on those pages.",
                 |ui| {

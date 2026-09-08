@@ -340,6 +340,9 @@ pub struct Settings {
     /// Windows always autoscrolls and macOS never does.
     pub middle_click_autoscroll: bool,
 
+    /// Allow single-key shortcut actions in every window, without affecting
+    /// text entry, type-ahead, or focused controls.
+    pub single_key_shortcuts: bool,
     /// Plain letters jump to the matching song in the track lists, the
     /// way file explorers jump to files.
     pub typeahead_jump: bool,
@@ -537,6 +540,7 @@ impl Default for Settings {
             queue_width: 360.0,
             tracklist_compact: false,
             middle_click_autoscroll: false,
+            single_key_shortcuts: true,
             typeahead_jump: false,
             typeahead_loose: true,
             search_history: Vec::new(),
@@ -1847,6 +1851,21 @@ mod tests {
         let restored: Settings = serde_json::from_str(&json).unwrap();
         assert!(restored.typeahead_jump);
         assert!(!restored.typeahead_loose);
+    }
+
+    #[test]
+    fn single_key_shortcuts_default_on_and_round_trip() {
+        let older: Settings = serde_json::from_str("{}").unwrap();
+        assert!(older.single_key_shortcuts);
+        for enabled in [false, true] {
+            let settings = Settings {
+                single_key_shortcuts: enabled,
+                ..Settings::default()
+            };
+            let json = serde_json::to_string(&settings).unwrap();
+            let restored: Settings = serde_json::from_str(&json).unwrap();
+            assert_eq!(restored.single_key_shortcuts, enabled);
+        }
     }
 
     #[test]
