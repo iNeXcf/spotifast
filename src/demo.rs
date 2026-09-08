@@ -13122,6 +13122,51 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn typeahead_boogy_does_not_unlike_the_playing_song() {
+        let (ctx, mut app, root) = playlist_app("typeahead-boogy", typeahead_settings());
+        let page = app.playlist_pages.get_mut("pl1").unwrap();
+        let mut boogy = track(1);
+        boogy.name = "Boogy".into();
+        page.items.items[1].item = Some(PlayableItem::Track(boogy));
+        page.items.revision = page.items.revision.wrapping_add(1);
+        assert_eq!(app.now_playing().unwrap().uri, "spotify:track:trk0");
+        assert_eq!(app.saved.get("spotify:track:trk0"), Some(&true));
+
+        for (text, key) in [
+            ("b", egui::Key::B),
+            ("o", egui::Key::O),
+            ("o", egui::Key::O),
+            ("g", egui::Key::G),
+            ("y", egui::Key::Y),
+        ] {
+            // Real typing sends both a shortcut key and a text event.
+            frame_events(
+                &ctx,
+                &mut app,
+                vec![
+                    egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::Text(text.into()),
+                ],
+            );
+            assert_eq!(
+                app.saved.get("spotify:track:trk0"),
+                Some(&true),
+                "typing {text} must not unlike the playing song"
+            );
+        }
+        press(&ctx, &mut app, egui::Key::Enter);
+        assert!(app.play_pending("spotify:track:trk1"));
+        app.backend.shutdown();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// While a song list is open, the plain keys it searches with are not
     /// shortcuts; everywhere else they still are.
     #[test]
@@ -13136,6 +13181,8 @@ mod tests {
         frame(&ctx, &mut app);
         press(&ctx, &mut app, egui::Key::L);
         assert!(app.show_lyrics_panel);
+        press(&ctx, &mut app, egui::Key::B);
+        assert_eq!(app.saved.get("spotify:track:trk0"), Some(&false));
         app.backend.shutdown();
         let _ = std::fs::remove_dir_all(root);
     }
@@ -13194,6 +13241,8 @@ mod tests {
         frame(&ctx, &mut app);
         press(&ctx, &mut app, egui::Key::L);
         assert!(app.show_lyrics_panel);
+        press(&ctx, &mut app, egui::Key::B);
+        assert_eq!(app.saved.get("spotify:track:trk0"), Some(&false));
         app.backend.shutdown();
         let _ = std::fs::remove_dir_all(root);
     }
@@ -13206,6 +13255,8 @@ mod tests {
         app.playlist_pages.get_mut("pl1").unwrap().playlist = Loadable::Failed("offline".into());
         press(&ctx, &mut app, egui::Key::L);
         assert!(app.show_lyrics_panel);
+        press(&ctx, &mut app, egui::Key::B);
+        assert_eq!(app.saved.get("spotify:track:trk0"), Some(&false));
         app.backend.shutdown();
         let _ = std::fs::remove_dir_all(root);
     }

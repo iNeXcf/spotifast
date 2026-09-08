@@ -37,9 +37,8 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     // its caret.
     let editing_text = ctx.text_edit_focused();
     let songs_picked = app.picked_rows(app.page()).is_some();
-    // On the song lists, type-ahead owns the plain letters: M, S, R, Q, and
-    // L type into the search instead of meaning mute, shuffle, repeat,
-    // queue, and lyrics. Everywhere else they keep their shortcuts.
+    // On song lists, type-ahead owns all plain letters, including the first
+    // letter of a new query. Everywhere else they keep their shortcuts.
     let typeahead_jumps = super::typeahead::owns_keyboard(app, ctx);
     let mut actions = Vec::new();
     ctx.input_mut(|input| {
@@ -159,26 +158,29 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
                 key(Modifiers::NONE, Key::L, Action::ToggleLyricsPanel);
             }
             key(Modifiers::NONE, Key::Slash, Action::FocusSearch);
-            key(
-                Modifiers::NONE,
-                Key::F,
-                if app.milkdrop_framed() {
-                    Action::MilkdropFullscreen
-                } else {
-                    Action::SetLyricsFullscreen(app.lyrics_fullscreen.is_none())
-                },
-            );
-            #[cfg(feature = "milkdrop")]
-            if app.lyrics_fullscreen.is_some() {
-                key(Modifiers::NONE, Key::V, Action::ToggleLyricsMilkdrop);
-                if app.milkdrop_behind_lyrics() {
-                    key(Modifiers::NONE, Key::N, Action::MilkdropEffect(1));
-                    key(Modifiers::NONE, Key::P, Action::MilkdropEffect(-1));
+            if !typeahead_jumps {
+                key(
+                    Modifiers::NONE,
+                    Key::F,
+                    if app.milkdrop_framed() {
+                        Action::MilkdropFullscreen
+                    } else {
+                        Action::SetLyricsFullscreen(app.lyrics_fullscreen.is_none())
+                    },
+                );
+                #[cfg(feature = "milkdrop")]
+                if app.lyrics_fullscreen.is_some() {
+                    key(Modifiers::NONE, Key::V, Action::ToggleLyricsMilkdrop);
+                    if app.milkdrop_behind_lyrics() {
+                        key(Modifiers::NONE, Key::N, Action::MilkdropEffect(1));
+                        key(Modifiers::NONE, Key::P, Action::MilkdropEffect(-1));
+                    }
                 }
             }
         }
     });
     if !editing_text
+        && !typeahead_jumps
         && app.dialog.is_none()
         && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::B))
         && let Some(now) = app.now_playing().filter(|now| !now.is_episode)
@@ -865,6 +867,84 @@ mod tests {
             assert_eq!(press(&mut app, Key::Q, shift), "[]");
             assert_eq!(press(&mut app, Key::F, command), "[]");
             assert_eq!(press(&mut app, Key::Space, Modifiers::NONE), "[]");
+        }
+        app.backend.shutdown();
+        let _ = std::fs::remove_dir_all(root);
+    }
+    #[test]
+    fn typeahead_owns_every_letter_shortcut() {
+        let root = std::env::temp_dir().join(format!(
+            "fastpotify-typeahead-shortcuts-test-{}",
+            std::process::id()
+        ));
+        let dirs = AppDirs {
+            config: root.join("config"),
+            state: root.join("state"),
+            cache: root.join("cache"),
+        };
+        let mut app = App::new(
+            &crate::backend::Waker::default(),
+            dirs,
+            Settings {
+                typeahead_jump: true,
+                ..Settings::default()
+            },
+            AppOptions {
+                restore_sign_in: false,
+                media_controls: false,
+                tray: false,
+                autostart: false,
+            },
+        );
+        crate::demo::populate(&mut app);
+
+        for page in [
+            Page::Playlist("pl1".into()),
+            Page::Album("alb0".into()),
+            Page::LikedSongs,
+            Page::TopSongs,
+        ] {
+            app.open(page);
+            for modifiers in [Modifiers::NONE, Modifiers::SHIFT] {
+                // Cover the alphabet, not just today's shortcut bindings.
+                for letter in 'A'..='Z' {
+                    let ctx = egui::Context::default();
+                    let key = Key::from_name(&letter.to_string()).unwrap();
+                    let text = if modifiers.shift {
+                        letter
+                    } else {
+                        letter.to_ascii_lowercase()
+                    };
+                    let events = vec![
+                        egui::Event::Key {
+                            key,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers,
+                        },
+                        egui::Event::Text(text.to_string()),
+                    ];
+                    app.actions.clear();
+                    let mut output = ctx.run_ui(
+                        egui::RawInput {
+                            events: events.clone(),
+                            ..Default::default()
+                        },
+                        |_ui| {
+                            handle(&mut app, &ctx);
+                            assert!(
+                                app.actions.is_empty(),
+                                "{text} must only search on {:?}: {:?}",
+                                app.page(),
+                                app.actions
+                            );
+                            assert_eq!(ctx.input(|input| input.events.clone()), events);
+                        },
+                    );
+                    output.textures_delta.clear();
+                }
+            }
         }
         app.backend.shutdown();
         let _ = std::fs::remove_dir_all(root);

@@ -892,5 +892,5 @@ type-ahead** also finds an unbroken run or letters scattered in order.
 
 The matched row is highlighted. Enter plays it, Backspace edits the query,
 and Escape or two seconds without typing clears it. Because a letter cannot
-be both search text and a shortcut, `M`, `S`, `R`, `Q`, and `L` do not run
-their usual shortcuts on those pages while type-ahead is enabled.
+be both search text and a shortcut, all plain-letter shortcuts (including `B`
+to like or unlike the playing song) yield to type-ahead on those pages.
