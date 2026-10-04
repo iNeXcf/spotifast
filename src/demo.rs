@@ -12975,7 +12975,7 @@ mod tests {
     /// An app with the sample data, the playlist page open, and a couple of
     /// frames drawn, for the keyboard tests below.
     fn playlist_app(name: &str, settings: Settings) -> (egui::Context, App, std::path::PathBuf) {
-        let root = std::env::temp_dir().join(format!("fastpotify-{name}-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("spotifast-{name}-{}", std::process::id()));
         let dirs = AppDirs {
             config: root.join("config"),
             state: root.join("state"),

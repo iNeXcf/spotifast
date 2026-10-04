@@ -38,14 +38,16 @@ fn the_command_reports_its_name_and_passes_the_update_version_check() {
     assert_eq!(spotifast::updates::CONFIG.slug, "spotifast");
 }
 
-/// The app's name before the rename is gone from everything but the past
-/// release notes and the two old guide addresses that still redirect.
+/// The app's name before the rename is gone from everything but the fork
+/// policy, past release notes and the two old guide addresses that still redirect.
 /// Spelled in two halves so this file does not match itself.
 #[test]
 fn no_file_carries_the_old_name() {
     let old = ["fast", "potify"].concat();
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let allowed = [
+        // The fork policy retains the fork's name and repository addresses.
+        root.join("AGENTS.md"),
         root.join("packaging/release-notes"),
         // Old guide URLs still redirect, so links from elsewhere keep working.
         root.join("docs/_guide/using-spotifast.md"),
