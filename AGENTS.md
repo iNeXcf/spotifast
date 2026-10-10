@@ -5,22 +5,22 @@ These instructions add implementation constraints for coding agents.
 
 ## Fork policy
 
-- This repository is maintained as **Fastpotify+**, our own version of
-  Fastpotify.
-- Treat `crmne/fastpotify` and the local `origin` remote as read-only upstream.
+- This repository is maintained as **Spotifast+**, our own version of
+  Spotifast.
+- Treat `crmne/spotifast` and the local `origin` remote as read-only upstream.
   Fetch and rebase upstream changes, but do not open or update issues, pull
   requests, reviews, comments, branches, releases, or other contributions
   there.
 - Code, issue tracking, automation, packages, and releases belong only in
-  `iNeXcf/fastpotify` and its `fork` remote.
-- Design every Fastpotify+ change as a patch that can be reapplied cleanly on
-  top of the current `crmne/fastpotify` `main`. Prefer additive modules, narrow
+  `iNeXcf/spotifast` and its `fork` remote.
+- Design every Spotifast+ change as a patch that can be reapplied cleanly on
+  top of the current `crmne/spotifast` `main`. Prefer additive modules, narrow
   integration points, and focused commits over copied or rewritten upstream
   code. Avoid unrelated refactors and formatting churn that make rebases
   harder.
 - When upstream gains equivalent behaviour, remove or shrink the fork patch
   instead of maintaining a duplicate implementation.
-- Keep useful upstream product and quality constraints unless Fastpotify+
+- Keep useful upstream product and quality constraints unless Spotifast+
   explicitly chooses a different direction. The fork policy in this section
   overrides upstream contribution, branch, and release instructions below.
 
@@ -179,10 +179,10 @@ Reviewers treat either problem in a pull request as a blocker.
 
 ## Branches
 
-Work only in `iNeXcf/fastpotify`. The maintained Fastpotify+ application branch
-is `fastpotify-plus`; the fork's `main` branch holds fork-level
+Work only in `iNeXcf/spotifast`. The maintained Spotifast+ application branch
+is `spotifast-plus`; the fork's `main` branch holds fork-level
 automation. Keep the application branch linear: upstream `main` followed only
-by Fastpotify+ commits. Rebase it when upstream moves; never merge upstream into
+by Spotifast+ commits. Rebase it when upstream moves; never merge upstream into
 it. Push only to the `fork` remote. Keep one topic per commit, with each commit
 compiling and passing its relevant checks.
 
