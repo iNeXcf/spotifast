@@ -1,6 +1,6 @@
 pkgbase = spotifast-plus-git
 	pkgdesc = Spotifast+ native Spotify client with direct type-ahead navigation
-	pkgver = 0.17.0.r1239.f3de891
+	pkgver = 0.17.2.r1277.1086795
 	pkgrel = 1
 	url = https://github.com/iNeXcf/spotifast
 	arch = x86_64
@@ -12,7 +12,7 @@ pkgbase = spotifast-plus-git
 	makedepends = clang
 	depends = dbus
 	depends = alsa-lib
-	depends = libpulse
+	depends = libpipewire
 	depends = libglvnd
 	depends = libxkbcommon
 	depends = wayland

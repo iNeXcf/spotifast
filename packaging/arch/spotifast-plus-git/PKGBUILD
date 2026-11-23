@@ -1,12 +1,12 @@
 # Maintainer: iNeXcf
 pkgname=spotifast-plus-git
-pkgver=0.17.0.r1239.f3de891
+pkgver=0.17.2.r1277.1086795
 pkgrel=1
 pkgdesc="Spotifast+ native Spotify client with direct type-ahead navigation"
 arch=('x86_64' 'aarch64')
 url="https://github.com/iNeXcf/spotifast"
 license=('MIT')
-depends=('dbus' 'alsa-lib' 'libpulse' 'libglvnd' 'libxkbcommon' 'wayland' 'libx11'
+depends=('dbus' 'alsa-lib' 'libpipewire' 'libglvnd' 'libxkbcommon' 'wayland' 'libx11'
          'hicolor-icon-theme')
 makedepends=('git' 'cargo' 'cmake' 'clang')
 optdepends=('libxkbcommon-x11: keyboard handling in X11 sessions'
